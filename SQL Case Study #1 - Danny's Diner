@@ -1,0 +1,257 @@
+/* --------------------
+   Case Study Questions
+   --------------------*/
+
+-- 1. What is the total amount each customer spent at the restaurant?
+-- 2. How many days has each customer visited the restaurant?
+-- 3. What was the first item from the menu purchased by each customer?
+-- 4. What is the most purchased item on the menu and how many times was it purchased by all customers?
+-- 5. Which item was the most popular for each customer?
+-- 6. Which item was purchased first by the customer after they became a member?
+-- 7. Which item was purchased just before the customer became a member?
+-- 8. What is the total items and amount spent for each member before they became a member?
+-- 9.  If each $1 spent equates to 10 points and sushi has a 2x points multiplier - how many points would each customer have?
+-- 10. In the first week after a customer joins the program (including their join date) they earn 2x points on all items, not just sushi - how many points do customer A and B have at the end of January?
+
+-- Example Query:
+SELECT
+  	product_id,
+    product_name,
+    price
+FROM dannys_diner.menu
+ORDER BY price DESC
+LIMIT 5;
+
+--1. total amount each cus spent
+WITH data_table AS (
+  SELECT
+      s.customer_id
+      ,s.product_id
+      ,m.price
+  FROM dannys_diner.sales s
+  LEFT JOIN dannys_diner.menu m
+  ON s.product_id = m.product_id
+)
+, total_spent AS (
+  SELECT data_table.*
+      , COUNT(product_id) AS num_orders
+      , COUNT(product_id)* price AS Money_spent
+  FROM data_table
+  GROUP BY customer_id, product_id, price
+)
+SELECT customer_id
+	,SUM(money_spent) AS total_spent
+FROM total_spent
+GROUP BY customer_id;
+
+--2. How many times cus used to visited res
+SELECT customer_id
+	,COUNT( DISTINCT order_date )
+FROM dannys_diner.sales
+GROUP BY customer_id;
+
+--3. What was the first item from the menu purchased by each customer?
+WITH join_table AS (
+  SELECT customer_id
+      , order_date
+      , s.product_id
+      ,product_name
+  FROM dannys_diner.sales s
+  LEFT JOIN dannys_diner.menu m
+  ON s.product_id = m.product_id)
+, rank_table AS (
+  SELECT customer_id
+      , order_date
+      , product_name
+      , DENSE_RANK() OVER(ORDER BY order_date) AS rank_order
+  FROM join_table)
+SELECT DISTINCT customer_id
+	, product_name
+FROM rank_table
+WHERE rank_order = 1
+ORDER BY customer_id;
+
+--4.Which item was the most popular for each customer?
+
+WITH join_table AS (
+  SELECT customer_id
+      , s.product_id
+      ,product_name
+  FROM dannys_diner.sales s
+  LEFT JOIN dannys_diner.menu m
+  ON s.product_id = m.product_id)
+, num_purchase_table AS (
+SELECT customer_id
+      , COUNT(product_id) AS num_purchase
+      , product_name
+  FROM join_table
+  GROUP BY customer_id, product_name
+)
+, max_order_table AS (
+SELECT customer_id
+	, product_name
+    , num_purchase
+    , MAX(num_purchase) OVER (PARTITION BY customer_id) AS max_order
+FROM num_purchase_table
+GROUP BY customer_id, product_name,num_purchase
+)
+SELECT 
+	customer_id
+	, product_name
+    , num_purchase
+FROM max_order_table
+WHERE num_purchase = max_order;
+
+--What is the most purchased item on the menu and how many times was it purchased by all customers?
+
+WITH join_table AS (
+  SELECT customer_id
+      , s.product_id
+      ,product_name
+  FROM dannys_diner.sales s
+  LEFT JOIN dannys_diner.menu m
+  ON s.product_id = m.product_id)
+SELECT product_name
+	, COUNT(product_id) as num_purchase
+FROM join_table
+GROUP BY product_name
+ORDER BY COUNT(product_id) DESC;
+
+--Which item was purchased first by the customer after they became a member?
+WITH join_table AS (
+  SELECT s.customer_id
+      , s.product_id
+      , join_date
+  	  , order_date
+  FROM dannys_diner.sales s
+  LEFT JOIN dannys_diner.members m
+  ON s.customer_id = m.customer_id
+  WHERE join_date IS NOT NULL
+)
+, time_join_table AS (
+SELECT customer_id
+	, product_id
+	, order_date - join_date AS time_join
+FROM join_table
+)
+, purchase_after_table AS (
+SELECT time_join_table.customer_id
+	, product_name
+    , time_join
+    , MIN(time_join) OVER (Partition By time_join_table.customer_id) AS first_date
+FROM time_join_table
+LEFT JOIN dannys_diner.menu m
+ON time_join_table.product_id = m.product_id
+WHERE time_join > 0
+)
+SELECT customer_id
+	, product_name
+FROM purchase_after_table
+WHERE time_join = first_date;
+
+--Which item was purchased just before the customer became a member?
+--What is the total items and amount spent for each member before they became a member?
+WITH join_table AS (
+  SELECT s.customer_id
+      , s.product_id
+      , join_date
+  	  , order_date
+  FROM dannys_diner.sales s
+  LEFT JOIN dannys_diner.members m
+  ON s.customer_id = m.customer_id
+)
+, time_join_table AS (
+  SELECT customer_id
+      , product_id
+      , order_date - join_date AS time_join
+      , order_date
+  FROM join_table)
+, price_table AS (
+  SELECT time_join_table.customer_id
+      , product_name
+      , time_join_table.product_id
+      , price
+      , order_date
+  FROM time_join_table
+  LEFT JOIN dannys_diner.menu m
+  ON time_join_table.product_id = m.product_id
+  WHERE time_join < 0 OR time_join IS NULL)
+, spent_table AS (
+SELECT customer_id
+	, product_name
+    , price
+    , COUNT(product_id)
+	, product_id
+	, COUNT(product_id)*1.0*price AS spent_each_product
+FROM price_table
+GROUP BY customer_id, price, product_name, product_id
+)
+SELECT *
+	, SUM(spent_each_product) OVER (PARTITION BY customer_id ORDER BY customer_id) AS total_spent
+FROM spent_table;
+
+-- If each $1 spent equates to 10 points and sushi has a 2x points multiplier - how many points would each customer have?
+-- 10. In the first week after a customer joins the program (including their join date) they earn 2x points on all items, not just sushi - how many points do customer A and B have at the end of January?
+
+WITH data_table AS (
+  SELECT
+      s.customer_id
+      ,s.product_id
+      ,m.price
+  FROM dannys_diner.sales s
+  LEFT JOIN dannys_diner.menu m
+  ON s.product_id = m.product_id
+)
+, total_spent AS (
+  SELECT data_table.*
+      , COUNT(product_id) AS num_orders
+      , COUNT(product_id)* price AS Money_spent
+  FROM data_table
+  GROUP BY customer_id, product_id, price
+)
+
+SElECT customer_id
+	, SUM(CASE WHEN product_id = 1 THEN money_spent*20 ELSE money_spent*10 END) AS cus_point
+FROM total_spent
+GROUP BY customer_id;
+
+WITH join_table AS (
+  SELECT s.customer_id
+      , s.product_id
+      , join_date
+  	  , order_date
+  FROM dannys_diner.sales s
+  LEFT JOIN dannys_diner.members m
+  ON s.customer_id = m.customer_id
+  WHERE join_date IS NOT NULL
+)
+, time_join_table AS (
+SELECT customer_id
+	, product_id
+  	, order_date
+	, order_date - join_date AS time_join
+FROM join_table
+)
+, price_table AS (
+SELECT time_join_table.customer_id
+	, product_name
+    , time_join
+    , time_join_table.product_id
+    , order_date
+    , price
+FROM time_join_table
+LEFT JOIN dannys_diner.menu m
+ON time_join_table.product_id = m.product_id
+WHERE time_join >= 0
+)
+, total_point_table AS (
+SELECT customer_id
+	, COUNT(product_id)*price*20 AS total_spent_point
+FROM  price_table
+GROUP BY customer_id, product_id, price
+)
+SElECT DISTINCT customer_id
+	, SUM(total_spent_point) OVER(PARTITION BY customer_id) AS total_point
+FROM total_point_table
+
+
