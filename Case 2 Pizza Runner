@@ -410,12 +410,12 @@ WITH prepare_data AS (
     FROM prepare_data
     GROUP BY order_id, price)
 , profit_table AS (
-SELECT revenue_table.*
-    , CONVERT(float,(CASE WHEN distance LIKE '%km'THEN RTRIM(LEFT(distance,LEN(distance)-2)) ELSE distance END))*0.3 AS delivery_charge
-    , revenue - CONVERT(float,(CASE WHEN distance LIKE '%km'THEN RTRIM(LEFT(distance,LEN(distance)-2)) ELSE distance END))*0.3 AS profit
-FROM revenue_table
-LEFT JOIN runner_orders
-ON revenue_table.order_id = runner_orders.order_id)
+      SELECT revenue_table.*
+          , CONVERT(float,(CASE WHEN distance LIKE '%km'THEN RTRIM(LEFT(distance,LEN(distance)-2)) ELSE distance END))*0.3 AS delivery_charge
+          , revenue - CONVERT(float,(CASE WHEN distance LIKE '%km'THEN RTRIM(LEFT(distance,LEN(distance)-2)) ELSE distance END))*0.3 AS profit
+      FROM revenue_table
+      LEFT JOIN runner_orders
+      ON revenue_table.order_id = runner_orders.order_id)
 SELECT SUM(profit) AS total_profit
 FROM profit_table
 
