@@ -1,0 +1,415 @@
+-- Check the customer_orders null value
+SELECT [order_id]
+      ,[customer_id]
+      ,[pizza_id]
+      ,[exclusions]
+      ,[extras]
+      ,[order_time]
+FROM [PizzaRunner].[dbo].[customer_orders]
+WHERE exclusions IS NULL;
+-- AS we can see Null values have been display in varchar type and Null is a special data type which can have only one value.
+-- So we need to get rid of these null
+/* This case study has LOTS of questions - they are broken up by area of focus including:
+
+Pizza Metrics
+Runner and Customer Experience
+Ingredient Optimisation
+Pricing and Ratings
+Bonus DML Challenges (DML = Data Manipulation Language) */
+
+--PART 1: Pizza Metrics
+-- How many pizzas were ordered?
+SELECT COUNT(*) as num_pizzas
+FROM [PizzaRunner].[dbo].[customer_orders];
+
+-- How many unique customer orders were made?
+SELECT COUNT(DISTINCT order_id) AS num_cus
+FROM customer_orders;
+
+--How many successful orders were delivered by each runner?
+SELECT runner_id
+      , COUNT(order_id) as num_success_deli
+FROM runner_orders
+WHERE cancellation NOT IN ('Restaurant Cancellation','Customer Cancellation')
+GROUP BY runner_id;
+
+-- How many of each type of pizza was delivered?
+SELECT COUNT(DISTINCT c.[pizza_id]) as num_typr_pizza
+FROM [PizzaRunner].[dbo].[customer_orders] c
+WHERE order_id IN (SELECT order_id
+FROM runner_orders 
+WHERE cancellation NOT IN ('Restaurant Cancellation','Customer Cancellation'))
+
+-- How many Vegetarian and Meatlovers were ordered by each customer?
+--the pizza name in text type can not be grouped by so we need to change it to varchar data type
+
+ALTER TABLE [PizzaRunner].[dbo].[pizza_names]
+ALTER COLUMN pizza_name varchar(50);
+
+SELECT  customer_id 
+      , pizza_name
+      , COUNT(order_id)
+FROM [PizzaRunner].[dbo].[customer_orders] o
+INNER JOIN [PizzaRunner].[dbo].[pizza_names] n
+ON o.pizza_id = n.pizza_id
+GROUP BY pizza_name, customer_id;
+
+-- What was the maximum number of pizzas delivered in a single order?
+SELECT TOP 1
+      order_id
+      , COUNT(order_id) AS num_order
+FROM [PizzaRunner].[dbo].[customer_orders]
+WHERE order_id IN (SELECT order_id
+FROM runner_orders 
+WHERE cancellation NOT IN ('Restaurant Cancellation','Customer Cancellation'))
+GROUP BY order_id
+ORDER BY num_order DESC
+
+-- For each customer, how many delivered pizzas had at least 1 change and how many had no changes?
+
+WITH cus_table AS (
+    SELECT
+        [customer_id]
+        ,order_id
+        ,CASE WHEN (LEN(CASE WHEN exclusions = 'null' THEN '' ELSE [exclusions] END) >=1 OR LEN(CASE WHEN extras = 'null' THEN '' ELSE [extras] END) >= 1) THEN 'Y' ELSE 'N' END AS change_status
+    FROM [PizzaRunner].[dbo].[customer_orders]
+    WHERE order_id IN (SELECT order_id
+    FROM runner_orders 
+    WHERE order_id IN (SELECT order_id
+    FROM runner_orders 
+    WHERE pickup_time <> 'null')))
+SELECT customer_id
+      , change_status
+      , COUNT(order_id) num_of change
+FROM cus_table
+GROUP BY  customer_id
+      , change_status
+
+-- How many pizzas were delivered that had both exclusions and extras?
+WITH both_change_table AS (
+    SELECT
+        [customer_id]
+        ,order_id
+        ,CASE WHEN (LEN(CASE WHEN exclusions = 'null' THEN '' ELSE [exclusions] END) >=1 AND LEN(CASE WHEN extras = 'null' THEN '' ELSE [extras] END) >= 1) THEN 1 ELSE 0 END AS both_change
+    FROM [PizzaRunner].[dbo].[customer_orders]
+    WHERE order_id IN (SELECT order_id
+    FROM runner_orders 
+    WHERE order_id IN (SELECT order_id
+    FROM runner_orders 
+    WHERE pickup_time <> 'null')))
+SELECT COUNT(both_change) as num_both_change
+FROM both_change_table
+WHERE both_change > 0;
+
+-- What was the total volume of pizzas ordered for each hour of the day?
+WITH order_vol AS (
+    SELECT order_id
+        ,DATEPART(hour,order_time) as [hour]
+        ,DATEPART(day,order_time) as [date]
+    FROM [PizzaRunner].[dbo].[customer_orders])
+SELECT [date]
+      ,[hour]
+      ,COUNT(order_id) AS num_order_per_hour
+FROM order_vol
+GROUP BY [date],[hour]
+ORDER BY 1,2;
+
+-- What was the volume of orders for each day of the week?
+
+WITH order_vol AS (
+    SELECT order_id
+        ,DATEPART(hour,order_time) as [hour]
+        ,DATEPART(day,order_time) as [date]
+    FROM [PizzaRunner].[dbo].[customer_orders])
+SELECT [date]
+      ,COUNT(order_id) AS num_order_per_hour
+FROM order_vol
+GROUP BY [date]
+ORDER BY 1,2;
+
+--PART2: Runner and Customer Experience
+--How many runners signed up for each 1 week period? (i.e. week starts 2021-01-01)
+
+SELECT
+      DATEPART(week,[registration_date]) as [week]
+      , COUNT([runner_id]) as num_runner_reg
+FROM [PizzaRunner].[dbo].[runners]
+GROUP BY DATEPART(week,[registration_date]);
+
+--What was the average time in minutes it took for each runner to arrive at the Pizza Runner HQ to pickup the order?
+
+SELECT runner_id
+      ,AVG(DATEPART(minute,([pickup_time] - [order_time]))*1.0) as avg_total_time_pick_up
+FROM customer_orders cd
+LEFT JOIN [PizzaRunner].[dbo].[runner_orders] ro 
+ON cd.order_id = ro.order_id
+WHERE pickup_time <> 'null'
+GROUP BY runner_id;
+
+--Is there any relationship between the number of pizzas and how long the order takes to prepare?
+WITH order_time_table AS (
+    SELECT 
+        co.order_id
+        , COUNT(co.order_id) AS num_pizza
+        , MAX((DATEPART(minute,([pickup_time] - [order_time]))*1.0)) as pick_up_time
+    FROM customer_orders co
+    LEFT JOIN [PizzaRunner].[dbo].[runner_orders] ro 
+    ON co.order_id = ro.order_id
+    WHERE pickup_time <> 'null'
+    GROUP BY co.order_id)
+SELECT DISTINCT num_pizza
+      , pick_up_time
+FROM order_time_table
+SELECT 
+      co.order_id
+      ,[pickup_time]
+      ,[order_time]
+      ,DATEPART(minute,([pickup_time] - [order_time]))*1.0 as pick_up_time
+FROM customer_orders co
+LEFT JOIN [PizzaRunner].[dbo].[runner_orders] ro 
+ON co.order_id = ro.order_id
+WHERE pickup_time <> 'null';
+
+-- we have special case when order at night, so maybe it is hard to find a runner so it takes more time to delivery (outlier)
+-- but we can see the prepare time have relationships with number of pizzas in an order 
+
+--What was the average distance travelled for each customer?
+WITH new_distance_table AS (
+    SELECT co.[order_id]
+        ,customer_id
+        ,[runner_id]
+        ,[pickup_time]
+        ,[distance]
+        ,[duration]
+        ,[cancellation]
+        ,CASE WHEN distance LIKE '%km'THEN RTRIM(LEFT(distance,LEN(distance)-2)) ELSE distance END AS new_distance
+    FROM [PizzaRunner].[dbo].[runner_orders] ro
+    INNER JOIN customer_orders co
+    ON ro.order_id = co.order_id
+    WHERE pickup_time <> 'null')
+SELECT 
+      customer_id
+      ,AVG(CONVERT(float,new_distance)) as avg_distance
+FROM new_distance_table
+GROUP BY customer_id;
+
+--What was the difference between the longest and shortest delivery times for all orders?
+SELECT MAX(CONVERT(int,LEFT(duration,2)))-MIN(CONVERT(int,LEFT(duration,2))) as diff_delivery_time
+FROM runner_orders
+WHERE pickup_time <> 'null'
+
+--What was the average speed for each runner for each delivery and do you notice any trend for these values?
+
+SELECT runner_id
+    , order_id
+    , CONVERT(float,(CASE WHEN distance LIKE '%km'THEN RTRIM(LEFT(distance,LEN(distance)-2)) ELSE distance END))/(CONVERT(int,LEFT(duration,2))*1.0/60) AS speed_kmh
+    , CONVERT(float,(CASE WHEN distance LIKE '%km'THEN RTRIM(LEFT(distance,LEN(distance)-2)) ELSE distance END)) AS new_distance
+    , CONVERT(int,LEFT(duration,2))*1.0/60 AS new_duration
+    , pickup_time
+FROM runner_orders
+WHERE pickup_time <> 'null'
+ORDER BY speed_kmh DESC, runner_id,  order_id
+ -- the avg_speed of other runner is stable in permission (35-60km/h) exept runner 2 with oreder_id 8
+
+ --What is the successful delivery percentage for each runner?
+WITH new_pick_up_table AS(
+    SELECT runner_id
+        , CASE WHEN pickup_time = 'null' THEN NULL ELSE pickup_time END AS new_pick_up_time
+    FROM runner_orders)
+SELECT runner_id
+    , FORMAT(COUNT(new_pick_up_time)*1.0/COUNT(*),'p') as success_pct
+FROM new_pick_up_table
+GROUP BY runner_id
+
+--PART3:Ingredient Optimisation
+-- What are the standard ingredients for each pizza?
+
+WITH new_pizza_recipes AS (
+    SELECT pizza_id, LTRIM(value) AS topping_id
+    FROM pizza_recipes 
+        CROSS APPLY STRING_SPLIT(CONVERT(Nvarchar(400),toppings), ',')
+)
+SELECT pizza_name
+    , topping_name
+FROM new_pizza_recipes pr 
+LEFT JOIN pizza_toppings pt
+ON pr.topping_id = pt.topping_id
+LEFT JOIN pizza_names pn
+ON pr.pizza_id = pn.pizza_id;  
+-- What was the most commonly added extra?
+
+WITH new_orders_table AS (
+    SELECT *,CASE WHEN extras = 'null' OR extras = '' THEN NULL ELSE extras END new_extras
+    FROM customer_orders)
+, extra_common AS (
+    SELECT order_id
+        , LTRIM(value) AS new_extra
+    FROM new_orders_table 
+        CROSS APPLY STRING_SPLIT(CONVERT(NVARCHAR,new_extras), ','))
+SELECT new_extra
+    , COUNT(new_extra) AS num_want_extra
+FROM extra_common 
+GROUP BY new_extra
+ORDER BY num_want_extra
+
+-- topping 1 Bacon is the most topping customers want to add on
+--What was the most common exclusion?
+
+WITH new_orders_table AS (
+    SELECT *,CASE WHEN exclusions = 'null' OR exclusions = '' THEN NULL ELSE exclusions END new_exclusions
+    FROM customer_orders)
+, exclusions_common AS (
+    SELECT order_id
+        , LTRIM(value) AS exclusions_nonull
+    FROM new_orders_table 
+        CROSS APPLY STRING_SPLIT(new_exclusions, ','))
+SELECT exclusions_nonull
+    , COUNT(exclusions_nonull) AS num_want_exclusions
+FROM exclusions_common
+GROUP BY exclusions_nonull
+ORDER BY num_want_exclusions DESC
+
+-- topping 4 Cheese is ther most common exclusion
+--What is the total quantity of each ingredient used in all delivered pizzas sorted by most frequent first?
+WITH new_orders_table AS (
+    SELECT *
+        , CASE WHEN extras = 'null' OR extras = '' THEN NULL ELSE extras END new_extras
+        , CASE WHEN exclusions = 'null' OR exclusions = '' THEN NULL ELSE exclusions END new_exclusions
+    FROM customer_orders
+    WHERE order_id IN (SELECT order_id
+        FROM runner_orders 
+        WHERE pickup_time <> 'null')) --prepare table need to use and clean null text value
+, extra_union AS (
+    SELECT order_id
+        , LTRIM(value) AS new_extras
+    FROM new_orders_table 
+        CROSS APPLY STRING_SPLIT(CONVERT(nvarchar,new_extras), ',')) -- find out extra ingredient 
+, exclusions_except AS (
+    SELECT order_id
+        , LTRIM(value) AS exclusions_nonull
+    FROM new_orders_table 
+        CROSS APPLY STRING_SPLIT(CONVERT(nvarchar,new_exclusions), ',')) -- find out exclu ingredient 
+, num_exclu_table AS (
+    SELECT order_id
+        , exclusions_nonull as topping_id
+        , COUNT(exclusions_nonull) as num_ingredient_exclu
+    FROM exclusions_except
+    GROUP BY order_id, exclusions_nonull)
+, topping_basic AS (
+    SELECT order_id, toppings
+    FROM customer_orders co
+    LEFT JOIN pizza_recipes pr 
+    ON co.pizza_id = pr.pizza_id)
+, topping_union AS ( 
+    SELECT order_id, LTRIM(value) AS topping_common --find out total ingredient without include or exclude
+    FROM topping_basic
+        CROSS APPLY STRING_SPLIT(CONVERT(NVARCHAR,toppings), ','))
+, new_union_table AS (
+    SELECT * 
+    FROM topping_union 
+    UNION ALL
+    SELECT *
+    FROM extra_union)
+, num_include_table AS (
+    SELECT order_id
+    , topping_common as topping_id
+    , COUNT(topping_common ) as num_ingredient_include -- count number of ingredients need to use with extras
+    FROM new_union_table
+    GROUP BY order_id, topping_common
+    )
+, over_view_table AS (
+    SELECT num_include_table.order_id
+        , num_include_table.topping_id
+        , num_ingredient_include
+        , num_ingredient_exclu
+    FROM num_include_table
+    LEFT JOIN num_exclu_table
+    ON num_include_table.order_id = num_exclu_table.order_id
+    AND num_include_table.topping_id = num_exclu_table.topping_id)
+, final_table AS(
+    SELECT order_id 
+        , topping_id
+        , num_ingredient_include - (CASE WHEN num_ingredient_exclu IS NULL THEN 0 ELSE num_ingredient_exclu END) AS num_ingredient_each_order -- subtract to find total ingredients needed to be used
+    FROM over_view_table)
+SELECT CONVERT(nvarchar,topping_name) AS ingredient_name
+    , SUM(num_ingredient_each_order) AS num_ingre_need
+FROM final_table
+JOIN pizza_toppings 
+ON final_table.topping_id = pizza_toppings.topping_id
+GROUP BY CONVERT(nvarchar,topping_name)
+ORDER BY num_ingre_need DESC
+
+
+--PART 4: D. Pricing and Ratings
+-- If a Meat Lovers pizza costs $12 and Vegetarian costs $10 and there were no charges for changes - how much money has Pizza Runner made so far if there are no delivery fees?
+WITH prepare_data AS (
+    SELECT *
+        , CASE WHEN pizza_id = 1 THEN 10 ELSE 12 END as price
+    FROM customer_orders
+    WHERE order_id IN (SELECT order_id FROM runner_orders WHERE pickup_time <> 'null'))
+, revenue_table AS (
+    SELECT pizza_id
+        , price*COUNT(pizza_id) AS revenue
+        , price
+    FROM prepare_data
+    GROUP BY pizza_id, price)
+SELECT *
+    , SUM(revenue) OVER () AS total_revenue
+FROM revenue_table
+ 
+-- What if there was an additional $1 charge for any pizza extras?
+-- Add cheese is $1 extra
+WITH prepare_data AS (
+    SELECT *
+        , CASE WHEN pizza_id = 1 THEN 10 ELSE 12 END as price
+        , CASE WHEN extras = 'null' OR extras = '' THEN NULL ELSE extras END new_extras
+    FROM customer_orders
+    WHERE order_id IN (SELECT order_id FROM runner_orders WHERE pickup_time <> 'null'))
+, extras_table AS(
+SELECT order_id
+        , LTRIM(value) AS new_extras
+FROM prepare_data
+    CROSS APPLY STRING_SPLIT(CONVERT(nvarchar,new_extras), ','))
+, add_on_table AS (
+SELECT 
+    order_id
+    , new_extras as topping_id
+    , CASE WHEN new_extras <> '4' THEN 2 ELSE 1 END AS add_on_revenue
+FROM extras_table)
+, revenue_table AS(
+    SELECT order_id
+        , price*COUNT(order_id) AS revenue
+        , price
+    FROM prepare_data
+    GROUP BY order_id, price)
+, final_total AS (
+SELECT revenue_table.order_id 
+    , revenue + CASE WHEN add_on_revenue IS NULL THEN 0 ELSE add_on_revenue END AS total_revenue
+FROM revenue_table
+LEFT JOIN add_on_table
+ON revenue_table.order_id = add_on_table.order_id)
+SELECT SUM(total_revenue) AS total_earn_after_add_on
+FROM final_total
+
+--If a Meat Lovers pizza was $12 and Vegetarian $10 fixed prices with no cost for extras and each runner is paid $0.30 per kilometre traveled - how much money does Pizza Runner have left over after these deliveries?
+WITH prepare_data AS (
+    SELECT *
+        , CASE WHEN pizza_id = 1 THEN 10 ELSE 12 END as price
+    FROM customer_orders
+    WHERE order_id IN (SELECT order_id FROM runner_orders WHERE pickup_time <> 'null'))
+,revenue_table AS (
+    SELECT order_id
+        , price*COUNT(order_id) AS revenue
+    FROM prepare_data
+    GROUP BY order_id, price)
+, profit_table AS (
+SELECT revenue_table.*
+    , CONVERT(float,(CASE WHEN distance LIKE '%km'THEN RTRIM(LEFT(distance,LEN(distance)-2)) ELSE distance END))*0.3 AS delivery_charge
+    , revenue - CONVERT(float,(CASE WHEN distance LIKE '%km'THEN RTRIM(LEFT(distance,LEN(distance)-2)) ELSE distance END))*0.3 AS profit
+FROM revenue_table
+LEFT JOIN runner_orders
+ON revenue_table.order_id = runner_orders.order_id)
+SELECT SUM(profit) AS total_profit
+FROM profit_table
+
+
