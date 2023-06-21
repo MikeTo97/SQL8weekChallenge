@@ -245,5 +245,12 @@ GROUP BY customer_id, product_id, price
 SElECT DISTINCT customer_id
 	, SUM(total_spent_point) OVER(PARTITION BY customer_id) AS total_point
 FROM total_point_table
-
+/* - Danny's restaurance has his loyal customers and his best sellers is curry and ramen,
+so he should target to improve these recipe. 
+- Otherwise, in case of membeship program, we can see the potential in customer's retention rate
+, so what he can do here is promotion for customers who register become his loyalty customers. 
+The cost of keeping exist customers just is 20% to compare with finding new customers
+- Scoring system is also a good idea in keeping customer use his product. Beside that he can use
+this as promotion campain in marketing and upsaling other dishes.*/
+ 
 
