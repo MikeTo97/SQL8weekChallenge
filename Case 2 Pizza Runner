@@ -1,5 +1,4 @@
 /*This case study has LOTS of questions - they are broken up by area of focus including:
-
 Pizza Metrics
 Runner and Customer Experience
 Ingredient Optimisation
@@ -37,15 +36,17 @@ FROM customer_orders;
 SELECT runner_id
       , COUNT(order_id) as num_success_deli
 FROM runner_orders
-WHERE cancellation NOT IN ('Restaurant Cancellation','Customer Cancellation')
+WHERE order_id IN (SELECT order_id
+    FROM runner_orders 
+    WHERE pickup_time <> 'null')
 GROUP BY runner_id;
 
 -- How many of each type of pizza was delivered?
 SELECT COUNT(DISTINCT c.[pizza_id]) as num_typr_pizza
 FROM [PizzaRunner].[dbo].[customer_orders] c
 WHERE order_id IN (SELECT order_id
-FROM runner_orders 
-WHERE cancellation NOT IN ('Restaurant Cancellation','Customer Cancellation'))
+    FROM runner_orders 
+    WHERE pickup_time <> 'null')
 
 -- How many Vegetarian and Meatlovers were ordered by each customer?
 --the pizza name in text type can not be grouped by so we need to change it to varchar data type
@@ -67,8 +68,8 @@ SELECT TOP 1
       , COUNT(order_id) AS num_order
 FROM [PizzaRunner].[dbo].[customer_orders]
 WHERE order_id IN (SELECT order_id
-FROM runner_orders 
-WHERE cancellation NOT IN ('Restaurant Cancellation','Customer Cancellation'))
+    FROM runner_orders 
+    WHERE pickup_time <> 'null')
 GROUP BY order_id
 ORDER BY num_order DESC
 
@@ -81,10 +82,8 @@ WITH cus_table AS (
         ,CASE WHEN (LEN(CASE WHEN exclusions = 'null' THEN '' ELSE [exclusions] END) >=1 OR LEN(CASE WHEN extras = 'null' THEN '' ELSE [extras] END) >= 1) THEN 'Y' ELSE 'N' END AS change_status
     FROM [PizzaRunner].[dbo].[customer_orders]
     WHERE order_id IN (SELECT order_id
-    FROM runner_orders 
-    WHERE order_id IN (SELECT order_id
-    FROM runner_orders 
-    WHERE pickup_time <> 'null')))
+        FROM runner_orders
+        WHERE pickup_time <> 'null'))
 SELECT customer_id
       , change_status
       , COUNT(order_id) num_of change
@@ -102,8 +101,8 @@ WITH both_change_table AS (
     WHERE order_id IN (SELECT order_id
     FROM runner_orders 
     WHERE order_id IN (SELECT order_id
-    FROM runner_orders 
-    WHERE pickup_time <> 'null')))
+                        FROM runner_orders 
+                        WHERE pickup_time <> 'null')))
 SELECT COUNT(both_change) as num_both_change
 FROM both_change_table
 WHERE both_change > 0;
@@ -410,12 +409,12 @@ WITH prepare_data AS (
     FROM prepare_data
     GROUP BY order_id, price)
 , profit_table AS (
-      SELECT revenue_table.*
-          , CONVERT(float,(CASE WHEN distance LIKE '%km'THEN RTRIM(LEFT(distance,LEN(distance)-2)) ELSE distance END))*0.3 AS delivery_charge
-          , revenue - CONVERT(float,(CASE WHEN distance LIKE '%km'THEN RTRIM(LEFT(distance,LEN(distance)-2)) ELSE distance END))*0.3 AS profit
-      FROM revenue_table
-      LEFT JOIN runner_orders
-      ON revenue_table.order_id = runner_orders.order_id)
+SELECT revenue_table.*
+    , CONVERT(float,(CASE WHEN distance LIKE '%km'THEN RTRIM(LEFT(distance,LEN(distance)-2)) ELSE distance END))*0.3 AS delivery_charge
+    , revenue - CONVERT(float,(CASE WHEN distance LIKE '%km'THEN RTRIM(LEFT(distance,LEN(distance)-2)) ELSE distance END))*0.3 AS profit
+FROM revenue_table
+LEFT JOIN runner_orders
+ON revenue_table.order_id = runner_orders.order_id)
 SELECT SUM(profit) AS total_profit
 FROM profit_table
 
